@@ -5,7 +5,6 @@ pdf("volcano.pdf")
 args <- commandArgs(TRUE)
 # input_name
 input_name <- args[1]
-#input_name <- '/run/user/1000/gvfs/sftp:host=pitzer.osc.edu,user=/fs/scratch/PAS0472/osu9900/mRNASeq/ghoshal_k/210520_Pearlly_GSL-PY-2144/output/deseq2/DMSO_vs_AZD/raw.results_renamed.txt'
 deseq2_table <- as.data.frame(read.table(input_name,
                                         header=TRUE, sep="\t", row.names=NULL))
 
