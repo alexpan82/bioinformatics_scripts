@@ -4,3 +4,4 @@
 - RNA-seq
 - Methylation
 - VDJ
+- General utility
