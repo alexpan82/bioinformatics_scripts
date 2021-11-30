@@ -41,13 +41,14 @@ def simulate(sum_q, q_dist_norm, kl_limit, n):
 
 
 def bin_cov(df, num_bins, utr):
-	store_values = [[], [], [], [], []]
+	store_values = [[], [], [], [], [], [], [], []]
 	for i in range(df.shape[0]):
 		df_line = df.iloc[i]
 		exon_cov = df_line['exon_cov']	# String with cov of each exon separated by ','
 		num_exons = df_line['exons']
 		num_nonzero = df_line['nonzero']
 		mu_bp = df_line['mu']
+		strand = bool(df_line['strand'])
 
 		cov = np.array(exon_cov.split(','), dtype=int)	# Coverage dist as an array
 		
@@ -70,27 +71,42 @@ def bin_cov(df, num_bins, utr):
 		#if num_exons < num_bins:
 		#	norm_cov = norm_cov[0:num_exons]
 		#	cov = cov[0:num_exons]
-			
+		
+		consec_zeros = (None, None)
+		fp_utr_percCov = None
+		tp_utr_percCov = None
 		# recalculate mu in terms of exon number instead of bp
-		exonic_mu = 'None'		
-		if sum(cov) != 0:
+		exonic_mu = 'None'
+		if sum(cov) > 0:
 			exonic_mu = ((2 / num_exons) * (sum(np.arange(num_exons) * cov) / sum(cov))) - 1
-		
-		consec_zeros = count_consecutive_zeros(cov)
-		
+        # Calculate number of consecutive exons w/ no coverage on 5'- and 3'-ends
+			consec_zeros = count_consecutive_zeros(cov)
+			fp_utr_percCov = norm_cov[0]
+			tp_utr_percCov = norm_cov[-1]
+			if (strand is False):
+				consec_zeros = (consec_zeros[1], consec_zeros[0],)
+				fp_utr_percCov = norm_cov[-1]
+				tp_utr_percCov = norm_cov[0]	
 		store_values[0].append(cov)
 		store_values[1].append(num_exons)
 		store_values[2].append(num_nonzero)
 		store_values[3].append(exonic_mu)
-		store_values[4].append(consec_zeros)
+		store_values[4].append(consec_zeros[0])
+		store_values[5].append(consec_zeros[1])
+		store_values[6].append(fp_utr_percCov)
+		store_values[7].append(tp_utr_percCov)
 
 	# Replace values in dataframe
 	df['exon_cov'] = store_values[0]
 	df['exons'] = store_values[1]
 	df['nonzero'] = store_values[2]
 	df['exonic_mu'] = store_values[3]
-	df['ends_consec_zero'] = store_values[4]
+	df['5p_consec_zero'] = store_values[4]
+	df['3p_consec_zero'] = store_values[5]
 	
+	if utr is True:
+		df['5p_utr_percCov'] = store_values[6]
+		df['3p_utr_percCov'] = store_values[7]
 
 
 def normalize(df):
@@ -158,13 +174,12 @@ if __name__ == '__main__':
 	# Set expression filter
 	exp_filter = float(args.exp)
 	
-	# fields = [exp, length, gene, non_zero_exons, exons, exon_cov]
 	if args.utr is True:
-		fields = [0, 2, 4, 6, 8, 10, 11]
+		fields = [0, 2, 4, 6, 7, 8, 10, 11]
 	else:
-		fields = [1, 3, 5, 6, 9, 10, 11]
+		fields = [1, 3, 5, 6, 7, 9, 10, 11]
 		
-	names = ['exp', 'mu', 'length', 'gene', 'nonzero', 'exons', 'exon_cov']
+	names = ['exp', 'mu', 'length', 'gene', 'strand', 'nonzero', 'exons', 'exon_cov']
 	df_list = []
 
 	for dat_file in [args.p, args.q]:
@@ -219,18 +234,27 @@ if __name__ == '__main__':
 			whichrow[gene] = i
 	
 	# Write results to output
-	result = pd.concat([df_list[0][['exons', 'length']], \
-				df_list[0][['mu', 'exonic_mu', 'exp', 'norm_exp', 'nonzero', 'ends_consec_zero']],
-				df_list[1][['mu', 'exonic_mu', 'exp', 'norm_exp', 'nonzero', 'ends_consec_zero']]], axis=1, join='outer')
+	adjust = 0
+	out_fields = ['mu', 'exonic_mu', 'exp', 'norm_exp', 'nonzero', '5p_consec_zero', '3p_consec_zero']
+	if args.utr is True:
+		adjust = 2
+		out_fields = ['mu', 'exonic_mu', 'exp', 'norm_exp', 'nonzero',
+			'5p_consec_zero', '3p_consec_zero', '5p_utr_percCov', '3p_utr_percCov']
+		
+	result = pd.concat([df_list[0][['exons', 'length']],
+				df_list[0][out_fields],
+				df_list[1][out_fields]],
+				axis=1, join='outer')
+
 	result['kl'] = kl_list
 	if args.sim != 0:
 		result['simulate'] = kl_significance
 	result = result.rename(index=df_list[0]['gene'])
 	result = result.replace('None', np.NaN)
 	#print(result)
-	result['truncation'] = (result.iloc[:,6] - result.iloc[:,12]) / result.iloc[:,0]
-	result['mu_diff'] = result.iloc[:,2].astype(float) - result.iloc[:,8].astype(float)
-	result['exon_mu_diff'] = result.iloc[:,3] - result.iloc[:,9]
+	result['truncation'] = (result.iloc[:,6] - result.iloc[:,13+adjust]) / result.iloc[:,0]
+	result['mu_diff'] = result.iloc[:,2].astype(float) - result.iloc[:,9+adjust].astype(float)
+	result['exon_mu_diff'] = result.iloc[:,3] - result.iloc[:,10+adjust]
 	result.to_csv(args.output + '.all.txt', sep="\t")
 	
 	# Filter by longest transcript for each gene
@@ -249,7 +273,7 @@ if __name__ == '__main__':
 	p_exp_list = p_exp_list[filter_rows]
 	p_exp_list_clean = np.delete(p_exp_list, np.where(kl_longest_iso == -100))
 	
-	q_exp_list = np.array(result.iloc[:,11])
+	q_exp_list = np.array(result.iloc[:,12+adjust])
 	q_exp_list = q_exp_list[filter_rows]
 	q_exp_list_clean = np.delete(q_exp_list, np.where(kl_longest_iso == -100))
 	
