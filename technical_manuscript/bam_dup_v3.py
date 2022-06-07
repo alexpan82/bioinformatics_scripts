@@ -1,3 +1,4 @@
+# Calculates positional and sequence duplication of BAM file
 import pysam
 import argparse
 import pybedtools
